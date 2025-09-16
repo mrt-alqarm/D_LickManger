@@ -2,67 +2,72 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 
-
-// Use a writable directory - Railway provides this
-const dbDir = process.env.RAILWAY_VOLUME_MOUNT_PATH 
-  ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'db')
-  : path.join(__dirname, 'db');
 // Ensure the database directory exists
+let dbDir;
+let dbPath;
 
+// Check if we're in Railway environment
+if (process.env.RAILWAY_VOLUME_MOUNT_PATH) {
+  // Use Railway's volume mount path
+  dbDir = path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'db');
+} else {
+  // Use local path
+  dbDir = path.join(__dirname, 'db');
+}
+
+// Create db directory if it doesn't exist
 if (!fs.existsSync(dbDir)) {
   try {
     fs.mkdirSync(dbDir, { recursive: true });
     console.log('Database directory created:', dbDir);
   } catch (err) {
-    console.error('Error creating database directory:', err.message);
-    // Fallback to current directory
-    console.log('Falling back to current directory for database');
-    // Don't exit, continue with current directory
+    console.log('Using /tmp for database due to permission issues');
+    dbDir = '/tmp/db';
+    if (!fs.existsSync(dbDir)) {
+      fs.mkdirSync(dbDir, { recursive: true });
+    }
   }
 }
 
-const dbPath = path.join(dbDir, 'links.db');
+dbPath = path.join(dbDir, 'links.db');
 console.log('Database path:', dbPath);
 
 // Test write permissions
 try {
-  const testFile = path.join(dbDir, 'test.tmp');
+  const testFile = path.join(dbDir, 'write-test.tmp');
   fs.writeFileSync(testFile, 'test');
   fs.unlinkSync(testFile);
   console.log('Write permissions confirmed for database directory');
 } catch (err) {
-  console.error('Write permissions issue:', err.message);
-  console.error('Database directory:', dbDir);
-  // Fallback to /tmp directory which is usually writable
-  const fallbackDir = '/tmp/db';
-  if (!fs.existsSync(fallbackDir)) {
-    fs.mkdirSync(fallbackDir, { recursive: true });
+  console.log('Write permissions issue, using /tmp instead');
+  dbDir = '/tmp/db';
+  dbPath = path.join(dbDir, 'links.db');
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
   }
-  // Update dbPath to use fallback
-  // Note: This will lose existing data, but it's better than not working
 }
 
 // Create or connect to the database
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Error opening database:', err.message);
-    console.error('Trying fallback to /tmp directory');
-    // Try fallback location
-    const fallbackPath = path.join('/tmp/db', 'links.db');
-    if (!fs.existsSync('/tmp/db')) {
-      fs.mkdirSync('/tmp/db', { recursive: true });
+let db;
+try {
+  db = new sqlite3.Database(dbPath, (err) => {
+    if (err) {
+      console.error('Error opening database:', err.message);
+    } else {
+      console.log('Connected to the SQLite database at:', dbPath);
     }
-    return new sqlite3.Database(fallbackPath, (fallbackErr) => {
-      if (fallbackErr) {
-        console.error('Fallback also failed:', fallbackErr.message);
-      } else {
-        console.log('Connected to database using fallback path:', fallbackPath);
-      }
-    });
-  } else {
-    console.log('Connected to the SQLite database at:', dbPath);
-  }
-});
+  });
+} catch (err) {
+  console.error('Database connection failed, trying fallback');
+  const fallbackPath = path.join('/tmp', 'links.db');
+  db = new sqlite3.Database(fallbackPath, (err) => {
+    if (err) {
+      console.error('Fallback database connection also failed:', err.message);
+    } else {
+      console.log('Connected to fallback database at:', fallbackPath);
+    }
+  });
+}
 
 // Initialize the database tables
 db.serialize(() => {
@@ -144,370 +149,6 @@ db.serialize(() => {
   });
 });
 
-// Database functions
-const dbFunctions = {
-  // Create a new link
-  createLink: (link) => {
-    return new Promise((resolve, reject) => {
-      const sql = `
-        INSERT INTO links (
-          id, title, originalUrl, maxDownloads, currentDownloads,
-          expirationHours, createdAt, expiresAt, isActive, isValid, lastChecked, statusCode, error
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `;
-      
-      const params = [
-        link.id,
-        link.title || null,
-        link.originalUrl,
-        link.maxDownloads || null,
-        link.currentDownloads || 0,
-        link.expirationHours || null,
-        link.createdAt.toISOString(),
-        link.expiresAt ? link.expiresAt.toISOString() : null,
-        link.isActive ? 1 : 0,
-        link.isValid !== undefined ? (link.isValid ? 1 : 0) : 1,
-        link.lastChecked ? link.lastChecked.toISOString() : null,
-        link.statusCode || null,
-        link.error || null
-      ];
-      
-      db.run(sql, params, function(err) {
-        if (err) {
-          reject(err);
-        } else {
-          resolve({ id: this.lastID });
-        }
-      });
-    });
-  },
-  
-  // Get a link by ID
-  getLink: (id) => {
-    return new Promise((resolve, reject) => {
-      const sql = `SELECT * FROM links WHERE id = ?`;
-      
-      db.get(sql, [id], (err, row) => {
-        if (err) {
-          reject(err);
-        } else {
-          if (row) {
-            // Convert SQLite data to JavaScript objects
-            row.currentDownloads = row.currentDownloads || 0;
-            row.isActive = row.isActive === 1;
-            row.isValid = row.isValid === 1 || row.isValid === undefined;
-            row.createdAt = new Date(row.createdAt);
-            row.expiresAt = row.expiresAt ? new Date(row.expiresAt) : null;
-            row.lastChecked = row.lastChecked ? new Date(row.lastChecked) : null;
-          }
-          resolve(row);
-        }
-      });
-    });
-  },
-  
-  // Get all links
-  getAllLinks: () => {
-    return new Promise((resolve, reject) => {
-      const sql = `SELECT * FROM links ORDER BY createdAt DESC`;
-      
-      db.all(sql, [], (err, rows) => {
-        if (err) {
-          reject(err);
-        } else {
-          // Convert SQLite data to JavaScript objects
-          rows = rows.map(row => {
-            row.currentDownloads = row.currentDownloads || 0;
-            row.isActive = row.isActive === 1;
-            row.isValid = row.isValid === 1 || row.isValid === undefined;
-            row.createdAt = new Date(row.createdAt);
-            row.expiresAt = row.expiresAt ? new Date(row.expiresAt) : null;
-            row.lastChecked = row.lastChecked ? new Date(row.lastChecked) : null;
-            return row;
-          });
-          resolve(rows);
-        }
-      });
-    });
-  },
-  
-  // Update link download count
-  incrementDownloadCount: (id) => {
-    return new Promise((resolve, reject) => {
-      const sql = `UPDATE links SET currentDownloads = currentDownloads + 1 WHERE id = ?`;
-      
-      db.run(sql, [id], function(err) {
-        if (err) {
-          reject(err);
-        } else {
-          resolve({ changes: this.changes });
-        }
-      });
-    });
-  },
-  
-  // Deactivate a link
-  deactivateLink: (id) => {
-    return new Promise((resolve, reject) => {
-      const sql = `UPDATE links SET isActive = 0 WHERE id = ?`;
-      
-      db.run(sql, [id], function(err) {
-        if (err) {
-          reject(err);
-        } else {
-          resolve({ changes: this.changes });
-        }
-      });
-    });
-  },
-  
-  // Update a link
-  updateLink: (id, updates) => {
-    return new Promise((resolve, reject) => {
-      let sql = `UPDATE links SET `;
-      const fields = [];
-      const params = [];
-      
-      // Build the update query dynamically
-      Object.keys(updates).forEach(key => {
-        if (key !== 'id') { // Don't update the ID
-          fields.push(`${key} = ?`);
-          params.push(updates[key]);
-        }
-      });
-      
-      if (fields.length === 0) {
-        return resolve({ changes: 0 });
-      }
-      
-      sql += fields.join(', ') + ' WHERE id = ?';
-      params.push(id);
-      
-      db.run(sql, params, function(err) {
-        if (err) {
-          reject(err);
-        } else {
-          resolve({ changes: this.changes });
-        }
-      });
-    });
-  },
-  
-  // Delete a link
-  deleteLink: (id) => {
-    return new Promise((resolve, reject) => {
-      const sql = `DELETE FROM links WHERE id = ?`;
-      
-      db.run(sql, [id], function(err) {
-        if (err) {
-          reject(err);
-        } else {
-          resolve({ changes: this.changes });
-        }
-      });
-    });
-  },
-  
-  // User management functions
-  
-  // Create a new user
-  createUser: (username, hashedPassword, role = 'user') => {
-    return new Promise((resolve, reject) => {
-      const sql = `
-        INSERT INTO users (username, password, role, createdAt)
-        VALUES (?, ?, ?, ?)
-      `;
-      
-      const params = [
-        username,
-        hashedPassword,
-        role,
-        new Date().toISOString()
-      ];
-      
-      db.run(sql, params, function(err) {
-        if (err) {
-          reject(err);
-        } else {
-          resolve({ id: this.lastID });
-        }
-      });
-    });
-  },
-  
-  // Get user by username
-  getUserByUsername: (username) => {
-    return new Promise((resolve, reject) => {
-      const sql = `SELECT * FROM users WHERE username = ?`;
-      
-      db.get(sql, [username], (err, row) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(row);
-        }
-      });
-    });
-  },
-  
-  // Get user by ID
-  getUserById: (id) => {
-    return new Promise((resolve, reject) => {
-      const sql = `SELECT * FROM users WHERE id = ?`;
-      
-      db.get(sql, [id], (err, row) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(row);
-        }
-      });
-    });
-  },
-  
-  // Get all users
-  getAllUsers: () => {
-    return new Promise((resolve, reject) => {
-      const sql = `SELECT id, username, role, createdAt FROM users ORDER BY createdAt DESC`;
-      
-      db.all(sql, [], (err, rows) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(rows);
-        }
-      });
-    });
-  },
-  
-  // Get all users with passwords (for internal use only)
-  getAllUsersWithPasswords: () => {
-    return new Promise((resolve, reject) => {
-      const sql = `SELECT * FROM users ORDER BY createdAt DESC`;
-      
-      db.all(sql, [], (err, rows) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(rows);
-        }
-      });
-    });
-  },
-  
-  // Update user password
-  updateUserPassword: (userId, hashedPassword) => {
-    return new Promise((resolve, reject) => {
-      const sql = `UPDATE users SET password = ? WHERE id = ?`;
-      
-      db.run(sql, [hashedPassword, userId], function(err) {
-        if (err) {
-          reject(err);
-        } else {
-          resolve({ changes: this.changes });
-        }
-      });
-    });
-  },
-  
-  // Update user information
-  updateUser: (userId, updates) => {
-    return new Promise((resolve, reject) => {
-      let sql = `UPDATE users SET `;
-      const fields = [];
-      const params = [];
-      
-      // Build the update query dynamically
-      Object.keys(updates).forEach(key => {
-        if (key !== 'id') { // Don't update the ID
-          fields.push(`${key} = ?`);
-          params.push(updates[key]);
-        }
-      });
-      
-      if (fields.length === 0) {
-        return resolve({ changes: 0 });
-      }
-      
-      sql += fields.join(', ') + ' WHERE id = ?';
-      params.push(userId);
-      
-      db.run(sql, params, function(err) {
-        if (err) {
-          reject(err);
-        } else {
-          resolve({ changes: this.changes });
-        }
-      });
-    });
-  },
-  
-  // Delete user
-  deleteUser: (userId) => {
-    return new Promise((resolve, reject) => {
-      const sql = `DELETE FROM users WHERE id = ?`;
-      
-      db.run(sql, [userId], function(err) {
-        if (err) {
-          reject(err);
-        } else {
-          resolve({ changes: this.changes });
-        }
-      });
-    });
-  },
-  
-  // Close the database connection
-  close: () => {
-    db.close((err) => {
-      if (err) {
-        console.error('Error closing database:', err.message);
-      } else {
-        console.log('Database connection closed.');
-      }
-    });
-  }
-  
-};
-// Example for createLink function with better error handling
-createLink: (link) => {
-  return new Promise((resolve, reject) => {
-    const sql = `
-      INSERT INTO links (
-        id, title, originalUrl, maxDownloads, currentDownloads,
-        expirationHours, createdAt, expiresAt, isActive, isValid, lastChecked, statusCode, error
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-    
-    const params = [
-      link.id,
-      link.title || null,
-      link.originalUrl,
-      link.maxDownloads || null,
-      link.currentDownloads || 0,
-      link.expirationHours || null,
-      link.createdAt.toISOString(),
-      link.expiresAt ? link.expiresAt.toISOString() : null,
-      link.isActive ? 1 : 0,
-      link.isValid !== undefined ? (link.isValid ? 1 : 0) : 1,
-      link.lastChecked ? link.lastChecked.toISOString() : null,
-      link.statusCode || null,
-      link.error || null
-    ];
-    
-    db.run(sql, params, function(err) {
-      if (err) {
-        console.error('Database insert error:', err.message);
-        console.error('Database path:', dbPath);
-        console.error('Parameters:', params);
-        reject(new Error(`Failed to create link: ${err.message}`));
-      } else {
-        console.log('Link created successfully with ID:', this.lastID);
-        resolve({ id: this.lastID });
-      }
-    });
-  });
-},
-
-
-module.exports = dbFunctions;
+// Rest of your existing database functions...
+// Keep all your existing functions exactly as they were
+// (createLink, getLink, getAllLinks, etc.)
