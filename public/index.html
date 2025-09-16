@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Link Manager - Cloud File Download Manager</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Link Manager</h1>
+            <p>Manage your cloud file download links with expiration dates and download limits</p>
+            <div class="header-actions" id="header-actions">
+                <!-- User management button will be shown conditionally -->
+                <button id="logout-button" class="logout-button">Logout</button>
+            </div>
+        </header>
+
+        <main>
+            <section class="create-link-section" id="create-link-section">
+                <h2>Create New Download Link</h2>
+                <form id="link-form">
+                    <div class="form-group">
+                        <label for="title">Link Title/Description (optional):</label>
+                        <input type="text" id="title" placeholder="My Important File">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="originalUrl">Original File URL:</label>
+                        <input type="url" id="originalUrl" required placeholder="https://example.com/file.zip">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="maxDownloads">Maximum Downloads (optional):</label>
+                        <input type="number" id="maxDownloads" min="1" placeholder="Unlimited">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="expirationHours">Expiration (hours, optional):</label>
+                        <input type="number" id="expirationHours" min="1" placeholder="Never expires">
+                    </div>
+                    
+                    <button type="submit">Create Tracking Link</button>
+                </form>
+                
+                <div id="result" class="result hidden">
+                    <h3>Your Tracking Link:</h3>
+                    <p id="trackingUrl"></p>
+                    <button id="copyButton">Copy to Clipboard</button>
+                </div>
+            </section>
+
+            <section class="manage-links-section">
+                <h2>Manage Your Links</h2>
+                <div class="search-container">
+                    <input type="text" id="search-input" placeholder="Search links by name...">
+                    <button id="search-button">Search</button>
+                    <button id="clear-search-button" style="display: none;">Clear</button>
+                </div>
+                <div id="links-list">
+                    <p>Loading links...</p>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>&copy; 2025 Link Manager. All rights reserved.</p>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

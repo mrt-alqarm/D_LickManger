@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Link Manager</title>
+    <link rel="stylesheet" href="login-styles.css">
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-header">
+            <h1>Link Manager</h1>
+            <p>Please sign in to continue</p>
+        </div>
+        
+        <section class="login-section">
+            <div id="message" class="hidden"></div>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="username">Username:</label>
+                    <input type="text" id="username" required placeholder="Enter your username">
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">Password:</label>
+                    <div class="password-input-container">
+                        <input type="password" id="password" required placeholder="Enter your password">
+                        <button type="button" class="toggle-password" data-target="password">Show</button>
+                    </div>
+                </div>
+                
+                <button type="submit" class="button">Login</button>
+            </form>
+        </section>
+    </div>
+
+    <script>
+        // DOM Elements
+        const loginForm = document.getElementById('login-form');
+        const messageElement = document.getElementById('message');
+        
+        // Event Listeners
+        loginForm.addEventListener('submit', handleLogin);
+        
+        // Add event listeners for password toggle buttons
+        document.addEventListener('click', function(event) {
+            if (event.target.classList.contains('toggle-password')) {
+                togglePasswordVisibility(event.target);
+            }
+        });
+        
+        // Handle login form submission
+        async function handleLogin(event) {
+            event.preventDefault();
+            
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            // Hide any previous message
+            messageElement.classList.add('hidden');
+            
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Store session ID in localStorage
+                    localStorage.setItem('sessionId', data.sessionId);
+                    // Redirect to main page
+                    window.location.href = '/';
+                } else {
+                    showMessage(data.error || 'Login failed', 'error');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                showMessage('An error occurred during login', 'error');
+            }
+        }
+        
+        // Toggle password visibility
+        function togglePasswordVisibility(button) {
+            const targetId = button.getAttribute('data-target');
+            const passwordInput = document.getElementById(targetId);
+            
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                button.textContent = 'Hide';
+            } else {
+                passwordInput.type = 'password';
+                button.textContent = 'Show';
+            }
+        }
+        
+        // Show message
+        function showMessage(text, type) {
+            messageElement.textContent = text;
+            messageElement.className = type + '-message';
+            messageElement.classList.remove('hidden');
+            
+            // Hide message after 5 seconds
+            setTimeout(() => {
+                messageElement.classList.add('hidden');
+            }, 5000);
+        }
+        
+        // No need to check for existing session on login page
+        // The login form handles authentication
+    </script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: link-manager
+    env: node
+    buildCommand: npm install
+    startCommand: npm run start:prod
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
