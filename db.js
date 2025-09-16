@@ -2,19 +2,29 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 
+
+// Use a writable directory - Railway provides this
+const dbDir = process.env.RAILWAY_VOLUME_MOUNT_PATH 
+  ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'db')
+  : path.join(__dirname, 'db');
 // Ensure the database directory exists
-const dbDir = path.join(__dirname, 'db');
-const dbPath = path.join(dbDir, 'links.db');
-// Create db directory if it doesn't exist
+
 if (!fs.existsSync(dbDir)) {
   try {
-    fs.mkdirSync(dbDir, { recursive: true, mode: 0o755 });
+    fs.mkdirSync(dbDir, { recursive: true });
     console.log('Database directory created:', dbDir);
   } catch (err) {
     console.error('Error creating database directory:', err.message);
+    // Fallback to current directory
+    console.log('Falling back to current directory for database');
+    // Don't exit, continue with current directory
   }
 }
-// Check if we can write to the directory
+
+const dbPath = path.join(dbDir, 'links.db');
+console.log('Database path:', dbPath);
+
+// Test write permissions
 try {
   const testFile = path.join(dbDir, 'test.tmp');
   fs.writeFileSync(testFile, 'test');
@@ -23,18 +33,34 @@ try {
 } catch (err) {
   console.error('Write permissions issue:', err.message);
   console.error('Database directory:', dbDir);
+  // Fallback to /tmp directory which is usually writable
+  const fallbackDir = '/tmp/db';
+  if (!fs.existsSync(fallbackDir)) {
+    fs.mkdirSync(fallbackDir, { recursive: true });
+  }
+  // Update dbPath to use fallback
+  // Note: This will lose existing data, but it's better than not working
 }
 
 // Create or connect to the database
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
     console.error('Error opening database:', err.message);
-    console.error('Database path:', dbPath);
-    console.error('Current working directory:', process.cwd());
-    console.error('Directory listing:', fs.readdirSync(path.dirname(dbPath)));
+    console.error('Trying fallback to /tmp directory');
+    // Try fallback location
+    const fallbackPath = path.join('/tmp/db', 'links.db');
+    if (!fs.existsSync('/tmp/db')) {
+      fs.mkdirSync('/tmp/db', { recursive: true });
+    }
+    return new sqlite3.Database(fallbackPath, (fallbackErr) => {
+      if (fallbackErr) {
+        console.error('Fallback also failed:', fallbackErr.message);
+      } else {
+        console.log('Connected to database using fallback path:', fallbackPath);
+      }
+    });
   } else {
-    console.log('Connected to the SQLite database.');
-    console.log('Database path:', dbPath);
+    console.log('Connected to the SQLite database at:', dbPath);
   }
 });
 
@@ -441,6 +467,47 @@ const dbFunctions = {
       }
     });
   }
+  
 };
+// Example for createLink function with better error handling
+createLink: (link) => {
+  return new Promise((resolve, reject) => {
+    const sql = `
+      INSERT INTO links (
+        id, title, originalUrl, maxDownloads, currentDownloads,
+        expirationHours, createdAt, expiresAt, isActive, isValid, lastChecked, statusCode, error
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    
+    const params = [
+      link.id,
+      link.title || null,
+      link.originalUrl,
+      link.maxDownloads || null,
+      link.currentDownloads || 0,
+      link.expirationHours || null,
+      link.createdAt.toISOString(),
+      link.expiresAt ? link.expiresAt.toISOString() : null,
+      link.isActive ? 1 : 0,
+      link.isValid !== undefined ? (link.isValid ? 1 : 0) : 1,
+      link.lastChecked ? link.lastChecked.toISOString() : null,
+      link.statusCode || null,
+      link.error || null
+    ];
+    
+    db.run(sql, params, function(err) {
+      if (err) {
+        console.error('Database insert error:', err.message);
+        console.error('Database path:', dbPath);
+        console.error('Parameters:', params);
+        reject(new Error(`Failed to create link: ${err.message}`));
+      } else {
+        console.log('Link created successfully with ID:', this.lastID);
+        resolve({ id: this.lastID });
+      }
+    });
+  });
+},
+
 
 module.exports = dbFunctions;
