@@ -4,16 +4,37 @@ const fs = require('fs');
 
 // Ensure the database directory exists
 const dbDir = path.join(__dirname, 'db');
+const dbPath = path.join(dbDir, 'links.db');
+// Create db directory if it doesn't exist
 if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
+  try {
+    fs.mkdirSync(dbDir, { recursive: true, mode: 0o755 });
+    console.log('Database directory created:', dbDir);
+  } catch (err) {
+    console.error('Error creating database directory:', err.message);
+  }
+}
+// Check if we can write to the directory
+try {
+  const testFile = path.join(dbDir, 'test.tmp');
+  fs.writeFileSync(testFile, 'test');
+  fs.unlinkSync(testFile);
+  console.log('Write permissions confirmed for database directory');
+} catch (err) {
+  console.error('Write permissions issue:', err.message);
+  console.error('Database directory:', dbDir);
 }
 
 // Create or connect to the database
-const db = new sqlite3.Database(path.join(dbDir, 'links.db'), (err) => {
+const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
     console.error('Error opening database:', err.message);
+    console.error('Database path:', dbPath);
+    console.error('Current working directory:', process.cwd());
+    console.error('Directory listing:', fs.readdirSync(path.dirname(dbPath)));
   } else {
     console.log('Connected to the SQLite database.');
+    console.log('Database path:', dbPath);
   }
 });
 
